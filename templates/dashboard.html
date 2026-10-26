@@ -239,9 +239,13 @@ a { color: var(--accent); text-decoration: none; }
     } catch(e) { return iso; }
   }
 
-  function fmtDate(iso) {
+  function fmtDateTime(iso) {
     if (!iso) return '—';
-    try { return iso.substring(0, 10); } catch(e) { return iso; }
+    try {
+      var d = new Date(iso);
+      return d.toLocaleDateString([], {year:'numeric', month:'2-digit', day:'2-digit'}) +
+             ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false});
+    } catch(e) { return iso; }
   }
 
   function relativeTime(iso) {
@@ -249,10 +253,11 @@ a { color: var(--accent); text-decoration: none; }
     try {
       var d = new Date(iso);
       var secs = Math.floor((Date.now() - d.getTime()) / 1000);
-      if (secs < 60) return 'just now';
-      if (secs < 3600) return Math.floor(secs/60) + ' min ago';
-      if (secs < 86400) return Math.floor(secs/3600) + 'h ago';
-      return Math.floor(secs/86400) + 'd ago';
+      if (secs < 0) secs = 0;
+      if (secs >= 86400) return fmtDateTime(iso);
+      if (secs < 60) return secs + 's ago';
+      if (secs < 3600) return Math.floor(secs/60) + 'm ' + (secs%60) + 's ago';
+      return Math.floor(secs/3600) + 'h ' + Math.floor((secs%3600)/60) + 'm ago';
     } catch(e) { return iso; }
   }
 
@@ -348,9 +353,9 @@ a { color: var(--accent); text-decoration: none; }
     html += ' <button class="btn-delete" onclick="deleteEng(\'' + _esc(eng.id) + '\')">Delete</button>';
     html += '</div>';
     html += '<div class="card-meta">';
-    html += 'Started: ' + fmtDate(eng.start_date);
-    if (eng.end_date) html += '&nbsp;&nbsp;Ends: ' + fmtDate(eng.end_date);
-    html += '&nbsp;&nbsp;Last update: ' + relativeTime(eng.last_seen);
+    html += 'Started: ' + fmtDateTime(eng.start_date);
+    if (eng.end_date) html += '&nbsp;&nbsp;Ended: ' + fmtDateTime(eng.end_date);
+    html += '&nbsp;&nbsp;Last update: <span class="last-seen" data-iso="' + _esc(eng.last_seen || '') + '">' + relativeTime(eng.last_seen) + '</span>';
     html += '</div>';
     html += renderRisk(snap.findings);
     html += renderTools(snap.tools, snap.queue);
@@ -401,8 +406,16 @@ a { color: var(--accent); text-decoration: none; }
     .catch(function(e) { console.error('delete:', e); });
   };
 
+  function tickLastSeen() {
+    var spans = document.querySelectorAll('.last-seen[data-iso]');
+    for (var i = 0; i < spans.length; i++) {
+      spans[i].textContent = relativeTime(spans[i].getAttribute('data-iso'));
+    }
+  }
+
   refresh();
   setInterval(refresh, 60000);
+  setInterval(tickLastSeen, 10000);
 })();
 </script>
 </body>
