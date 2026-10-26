@@ -274,6 +274,21 @@ a { color: var(--accent); text-decoration: none; }
            '<span class="risk-total">Total: ' + total + '</span></div>';
   }
 
+  function _toolName(tid) {
+    var NAMES = {
+      ss3:'Scattershot3', fracture:'Fracture', siphon:'Siphon',
+      osift:'OSift', isotope:'Isotope', bastion:'Bastion',
+      gearbox:'Gearbox', authprobe:'AuthProbe', quill:'Quill',
+      forge:'Forge', dredge:'Dredge', auger:'Auger', trawler:'Trawler',
+      nessus:'Nessus', phalanx:'Phalanx', pain:'pAIn'
+    };
+    var parts = tid.split(':');
+    var base = parts[0];
+    var scope = parts.length > 1 ? parts.slice(1).join(':') : '';
+    var name = NAMES[base] || base.charAt(0).toUpperCase() + base.slice(1);
+    return scope ? name + ' [' + scope + ']' : name;
+  }
+
   function renderTools(tools, queue) {
     var rows = [];
     if (tools && typeof tools === 'object') {
@@ -294,7 +309,7 @@ a { color: var(--accent); text-decoration: none; }
         var ver = t.tool_version ? 'v' + t.tool_version : '';
         rows.push('<tr>' +
           '<td><span class="status-icon ' + ic.cls + '">' + ic.sym + '</span></td>' +
-          '<td class="tool-name">' + _esc(tid) + '</td>' +
+          '<td class="tool-name">' + _esc(_toolName(tid)) + '</td>' +
           '<td class="tool-status">' + st + '</td>' +
           '<td class="tool-time">' + timeStr + '</td>' +
           '<td class="tool-ver">' + ver + '</td></tr>');
@@ -306,7 +321,7 @@ a { color: var(--accent); text-decoration: none; }
         var qic = STATUS_ICONS.queued;
         rows.push('<tr>' +
           '<td><span class="status-icon queued">' + qic.sym + '</span></td>' +
-          '<td class="tool-name">' + _esc(q.tool_id || '') + '</td>' +
+          '<td class="tool-name">' + _esc(_toolName(q.tool_id || '')) + '</td>' +
           '<td class="tool-status">queued</td>' +
           '<td class="tool-time">pri:' + (q.priority || 0) + '</td>' +
           '<td class="tool-ver"></td></tr>');
@@ -330,6 +345,7 @@ a { color: var(--accent); text-decoration: none; }
             (eng.client_name && eng.name ? ' — ' : '') +
             _esc(eng.name || '') + '</span>';
     html += '<span class="card-status active">● ACTIVE</span>';
+    html += ' <button class="btn-delete" onclick="deleteEng(\'' + _esc(eng.id) + '\')">Delete</button>';
     html += '</div>';
     html += '<div class="card-meta">';
     html += 'Started: ' + fmtDate(eng.start_date);
@@ -367,6 +383,23 @@ a { color: var(--accent); text-decoration: none; }
       })
       .catch(function(e) { console.error('refresh:', e); });
   }
+
+  window.deleteEng = function(id) {
+    if (!confirm('Delete this engagement? This cannot be undone.')) return;
+    fetch('/api/engagement/' + encodeURIComponent(id), {
+      method: 'DELETE', credentials: 'same-origin'
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.status === 'deleted') {
+        var card = document.querySelector('.card[data-id="' + id + '"]');
+        if (card) card.remove();
+        var remaining = container.querySelectorAll('.card');
+        if (!remaining.length) emptyEl.style.display = '';
+      }
+    })
+    .catch(function(e) { console.error('delete:', e); });
+  };
 
   refresh();
   setInterval(refresh, 60000);
