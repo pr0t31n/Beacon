@@ -449,13 +449,13 @@ def _run_cleanup():
 # ── Main ──────────────────────────────────────────────────────────────────
 
 def main():
+    global _DB_PATH
     parser = argparse.ArgumentParser(description="Beacon — engagement status server")
     parser.add_argument("--port", type=int, default=9443)
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--db", default=str(_DB_PATH))
     args = parser.parse_args()
 
-    global _DB_PATH
     _DB_PATH = Path(args.db)
 
     logging.basicConfig(level=logging.INFO,
