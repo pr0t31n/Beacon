@@ -1,5 +1,5 @@
 {
   "username": "admin",
-  "password_hash": "scrypt:32768:8:1$5dzTAItU4E7O71UE$a16b85a75b77e609836ab609296576b28c12a183dd33c9e17276674d443fdb5b50983300f60de639f54382c9f0ebe9fa2eac6c01c3c1fa51cedccbce59903262",
-  "must_change": true
+  "password_hash": "scrypt:32768:8:1$uQZlN4y2rr9eOewZ$049e9a5f26927ffd129d75390a5b38c79e12cc66a8f9f976e476f8f7f13d579ca840b66f3e5b8823800914ece2576b9f0022ff0184e90f38b36ddce9d3d2da86",
+  "must_change": false
 }
