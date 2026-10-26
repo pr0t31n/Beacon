@@ -120,7 +120,7 @@ app.jinja_env.globals["relative_time"] = _relative_time
 
 # ── Security middleware ───────────────────────────────────────────────────
 
-_PUBLIC_API = {"/api/status"}
+_PUBLIC_API = {"/api/status", "/api/ping"}
 
 @app.before_request
 def _before():

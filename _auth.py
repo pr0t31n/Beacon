@@ -310,7 +310,7 @@ def apply_security_headers(response):
 
 # ── Request gate ──────────────────────────────────────────────────────────────
 
-_PUBLIC = {"/login", "/logout", "/session-expired", "/api/status", "/api/ping"}
+_PUBLIC = {"/auth/login", "/auth/logout", "/auth/session-expired", "/auth/change-password", "/api/status", "/api/ping"}
 
 # ── Server-side session tokens ───────────────────────────────────────────────
 _session_tokens: dict = {}
