@@ -364,9 +364,10 @@ a { color: var(--accent); text-decoration: none; }
   }
 
   function refresh() {
-    fetch('/api/engagements', {credentials: 'same-origin'})
+    return fetch('/api/engagements', {credentials: 'same-origin'})
       .then(function(r) {
         if (r.status === 401) { window.location.href = '/auth/login'; return null; }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
       .then(function(data) {
@@ -414,8 +415,21 @@ a { color: var(--accent); text-decoration: none; }
   }
 
   refresh();
-  setInterval(refresh, 60000);
+  var _refreshTimer = null;
+  function scheduleRefresh() {
+    _refreshTimer = setTimeout(function() {
+      refresh().then(scheduleRefresh).catch(scheduleRefresh);
+    }, 60000);
+  }
+  scheduleRefresh();
   setInterval(tickLastSeen, 10000);
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) {
+      refresh();
+      if (_refreshTimer) clearTimeout(_refreshTimer);
+      scheduleRefresh();
+    }
+  });
 })();
 </script>
 </body>
