@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS engagements (
     client_name   TEXT NOT NULL,
     token_hash    TEXT NOT NULL,
     source_ip     TEXT,
+    source_hostname TEXT DEFAULT '',
     start_date    TEXT,
     end_date      TEXT,
     created_at    TEXT NOT NULL,
@@ -67,6 +68,10 @@ CREATE INDEX IF NOT EXISTS idx_engagements_last_seen
 def _init_db(db_path: Path) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(_SCHEMA)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(engagements)").fetchall()}
+        if "source_hostname" not in cols:
+            conn.execute("ALTER TABLE engagements ADD COLUMN source_hostname TEXT DEFAULT ''")
+            conn.commit()
 
 
 def _get_db() -> sqlite3.Connection:
@@ -259,6 +264,7 @@ def api_status():
     client = str(data.get("client_name", ""))[:200]
     now = _now_iso()
     source_ip = request.remote_addr or ""
+    source_hostname = str(data.get("source_hostname", ""))[:253]
 
     with _db_lock:
         db = _get_db()
@@ -267,9 +273,10 @@ def api_status():
         if row is None:
             db.execute(
                 "INSERT INTO engagements "
-                "(id, name, client_name, token_hash, source_ip, start_date, end_date, created_at, last_seen)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (eng_id, name, client, token_h, source_ip,
+                "(id, name, client_name, token_hash, source_ip, source_hostname, "
+                "start_date, end_date, created_at, last_seen)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (eng_id, name, client, token_h, source_ip, source_hostname,
                  str(data.get("start_date", ""))[:30],
                  str(data.get("end_date", ""))[:30],
                  now, now),
@@ -279,8 +286,9 @@ def api_status():
                 return jsonify({"error": "Token mismatch"}), 401
             db.execute(
                 "UPDATE engagements SET name=?, client_name=?, source_ip=?, "
-                "start_date=?, end_date=?, last_seen=?, active=1 WHERE id=?",
-                (name, client, source_ip,
+                "source_hostname=?, start_date=?, end_date=?, last_seen=?, "
+                "active=1 WHERE id=?",
+                (name, client, source_ip, source_hostname,
                  str(data.get("start_date", ""))[:30],
                  str(data.get("end_date", ""))[:30],
                  now, eng_id),
@@ -325,6 +333,7 @@ def api_engagements():
             "end_date": r["end_date"],
             "last_seen": r["last_seen"],
             "source_ip": r["source_ip"],
+            "source_hostname": r["source_hostname"] or "",
             "snapshot": snap,
         })
     return jsonify(result)
@@ -364,6 +373,7 @@ def api_engagement_detail(eng_id):
         "end_date": eng["end_date"],
         "last_seen": eng["last_seen"],
         "source_ip": eng["source_ip"],
+        "source_hostname": eng["source_hostname"] or "",
         "created_at": eng["created_at"],
         "history": history,
     })

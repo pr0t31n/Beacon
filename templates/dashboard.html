@@ -356,6 +356,10 @@ a { color: var(--accent); text-decoration: none; }
     html += 'Started: ' + fmtDateTime(eng.start_date);
     if (eng.end_date) html += '&nbsp;&nbsp;Ended: ' + fmtDateTime(eng.end_date);
     html += '&nbsp;&nbsp;Last update: <span class="last-seen" data-iso="' + _esc(eng.last_seen || '') + '">' + relativeTime(eng.last_seen) + '</span>';
+    var srcParts = [];
+    if (eng.source_hostname) srcParts.push(_esc(eng.source_hostname));
+    if (eng.source_ip) srcParts.push(_esc(eng.source_ip));
+    if (srcParts.length) html += '&nbsp;&nbsp;Source: ' + srcParts.join(' (') + (srcParts.length > 1 ? ')' : '');
     html += '</div>';
     html += renderRisk(snap.findings);
     html += renderTools(snap.tools, snap.queue);
