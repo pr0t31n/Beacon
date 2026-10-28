@@ -40,9 +40,19 @@ def _load_settings() -> dict:
     if not _SETTINGS_FILE.exists():
         return {}
     try:
-        return json.loads(_SETTINGS_FILE.read_text())
-    except Exception:
+        data = json.loads(_SETTINGS_FILE.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"  WARNING: beacon_settings.json is invalid: {exc}")
         return {}
+    for key in ("public_ips", "public_hostnames"):
+        val = data.get(key)
+        if isinstance(val, list):
+            bad = [v for v in val if not isinstance(v, str)]
+            if bad:
+                print(f"  ERROR: beacon_settings.json '{key}' entries must be "
+                      f"quoted strings, got: {bad}")
+                data[key] = [v for v in val if isinstance(v, str)]
+    return data
 
 # ── App factory ───────────────────────────────────────────────────────────
 
