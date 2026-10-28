@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Beacon — Engagement status server for pr0t31n Crucible.
+"""Beacon — Engagement status server for pr0t31n toolkit.
 
-Receives status pushes from one or more Crucible instances and presents
-a spartan, read-only dashboard showing live engagement progress.
+Receives status pushes from Crucible instances and third-party security
+tools via webhooks.  Presents a spartan, read-only dashboard showing
+live engagement and scan progress.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import logging
 import sqlite3
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -20,8 +22,14 @@ from flask import (Flask, g, jsonify, redirect, render_template,
                    request, session, url_for)
 
 import _auth
+try:
+    import webhook_parsers as _wp
+except ImportError:
+    _wp = None
 
 VERSION = Path(__file__).resolve().parent.joinpath("VERSION").read_text().strip()
+
+_MAX_WEBHOOK_PAYLOAD = 1 * 1024 * 1024  # 1 MB
 
 log = logging.getLogger("beacon")
 
@@ -62,6 +70,38 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_eng
     ON snapshots(engagement_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_engagements_last_seen
     ON engagements(last_seen);
+
+CREATE TABLE IF NOT EXISTS webhook_sources (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    provider      TEXT NOT NULL DEFAULT 'generic',
+    token_hash    TEXT NOT NULL,
+    source_ip     TEXT,
+    created_at    TEXT NOT NULL,
+    last_seen     TEXT NOT NULL,
+    active        INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS webhook_tasks (
+    id            TEXT NOT NULL,
+    source_id     TEXT NOT NULL REFERENCES webhook_sources(id) ON DELETE CASCADE,
+    task_name     TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'unknown',
+    progress      REAL,
+    started_at    TEXT,
+    ended_at      TEXT,
+    message       TEXT DEFAULT '',
+    findings_json TEXT,
+    metadata_json TEXT DEFAULT '{}',
+    first_seen    TEXT NOT NULL,
+    last_updated  TEXT NOT NULL,
+    PRIMARY KEY (source_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_tasks_source
+    ON webhook_tasks(source_id, last_updated DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_sources_last_seen
+    ON webhook_sources(last_seen);
 """
 
 
@@ -71,6 +111,11 @@ def _init_db(db_path: Path) -> None:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(engagements)").fetchall()}
         if "source_hostname" not in cols:
             conn.execute("ALTER TABLE engagements ADD COLUMN source_hostname TEXT DEFAULT ''")
+            conn.commit()
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "webhook_sources" not in tables or "webhook_tasks" not in tables:
+            conn.executescript(_SCHEMA)
             conn.commit()
 
 
@@ -133,6 +178,8 @@ def _before():
     if path.startswith("/static/"):
         return None
     if path in _PUBLIC_API:
+        return None
+    if path == "/api/webhook" or path.startswith("/api/webhook/"):
         return None
     gate = _auth.auth_gate()
     if gate is not None:
@@ -305,6 +352,207 @@ def api_status():
     return jsonify({"status": "ok", "received_at": now}), 200
 
 
+# ── API: Webhook receiver (bearer-token auth) ────────────────────────────
+
+_VALID_STATUSES = {"queued", "running", "paused", "complete", "failed", "cancelled", "unknown"}
+
+def _auth_bearer():
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None, (jsonify({"error": "Missing or invalid Authorization header"}), 401)
+    token = auth_header[7:].strip()
+    if not token:
+        return None, (jsonify({"error": "Empty bearer token"}), 401)
+    return token, None
+
+
+def _upsert_webhook_source(db, token_hash, provider, source_name, source_ip, now):
+    row = db.execute(
+        "SELECT id, token_hash FROM webhook_sources WHERE token_hash = ?",
+        (token_hash,)).fetchone()
+    if row is not None:
+        db.execute(
+            "UPDATE webhook_sources SET last_seen=?, source_ip=?, active=1 WHERE id=?",
+            (now, source_ip, row["id"]))
+        return row["id"]
+    src_id = str(uuid.uuid4())
+    db.execute(
+        "INSERT INTO webhook_sources (id, name, provider, token_hash, source_ip, "
+        "created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (src_id, source_name[:200], provider, token_hash, source_ip, now, now))
+    return src_id
+
+
+def _upsert_webhook_task(db, source_id, parsed, now):
+    task_id = str(parsed.get("task_id", ""))[:500]
+    if not task_id:
+        return
+    status = parsed.get("status", "unknown")
+    if status not in _VALID_STATUSES:
+        status = "unknown"
+    findings = parsed.get("findings_summary")
+    findings_j = json.dumps(findings, default=str) if findings else None
+    meta_j = json.dumps(parsed.get("metadata", {}), default=str)[:65536]
+
+    existing = db.execute(
+        "SELECT id FROM webhook_tasks WHERE source_id=? AND id=?",
+        (source_id, task_id)).fetchone()
+    if existing:
+        db.execute(
+            "UPDATE webhook_tasks SET task_name=?, status=?, progress=?, "
+            "started_at=COALESCE(?, started_at), ended_at=?, message=?, "
+            "findings_json=COALESCE(?, findings_json), metadata_json=?, "
+            "last_updated=? WHERE source_id=? AND id=?",
+            (str(parsed.get("task_name", ""))[:500], status,
+             parsed.get("progress"), parsed.get("started_at"),
+             parsed.get("ended_at"), str(parsed.get("message", ""))[:2000],
+             findings_j, meta_j, now, source_id, task_id))
+    else:
+        db.execute(
+            "INSERT INTO webhook_tasks (id, source_id, task_name, status, progress, "
+            "started_at, ended_at, message, findings_json, metadata_json, "
+            "first_seen, last_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, source_id, str(parsed.get("task_name", ""))[:500],
+             status, parsed.get("progress"), parsed.get("started_at"),
+             parsed.get("ended_at"), str(parsed.get("message", ""))[:2000],
+             findings_j, meta_j, now, now))
+
+
+def _process_webhook(provider):
+    token, err = _auth_bearer()
+    if err:
+        return err
+    cl = request.content_length or 0
+    if cl > _MAX_WEBHOOK_PAYLOAD:
+        return jsonify({"error": "Payload too large (max 1MB)"}), 413
+
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+    if _wp is None and provider != "generic":
+        return jsonify({"error": "Webhook parsers module not available"}), 500
+
+    if provider == "generic":
+        parsed = {
+            "source": str(data.get("source", "generic"))[:200],
+            "source_version": str(data.get("source_version", ""))[:50],
+            "task_id": data.get("task_id"),
+            "task_name": data.get("task_name", ""),
+            "status": data.get("status", "unknown"),
+            "progress": data.get("progress"),
+            "started_at": data.get("started_at"),
+            "ended_at": data.get("ended_at"),
+            "message": data.get("message", ""),
+            "findings_summary": data.get("findings_summary"),
+            "metadata": data.get("metadata", {}),
+        }
+        if not parsed["task_id"]:
+            return jsonify({"error": "Missing required field: task_id"}), 400
+    else:
+        parsed = _wp.parse(provider, data)
+        if parsed is None:
+            return jsonify({"error": f"Could not parse payload for provider '{provider}'"}), 400
+
+    token_h = _hash_token(token)
+    now = _now_iso()
+    source_ip = request.remote_addr or ""
+    source_name = str(parsed.get("source", provider))[:200]
+
+    with _db_lock:
+        db = _get_db()
+        src_id = _upsert_webhook_source(db, token_h, provider, source_name, source_ip, now)
+        _upsert_webhook_task(db, src_id, parsed, now)
+        db.commit()
+
+    return jsonify({"status": "ok", "source_id": src_id, "received_at": now}), 200
+
+
+@app.route("/api/webhook", methods=["POST"])
+def api_webhook_generic():
+    return _process_webhook("generic")
+
+
+@app.route("/api/webhook/<provider>", methods=["POST"])
+def api_webhook_provider(provider):
+    if _wp is None:
+        return jsonify({"error": "Webhook parsers module not available"}), 500
+    if provider not in _wp.PARSERS:
+        supported = sorted(_wp.PARSERS.keys())
+        return jsonify({"error": f"Unknown provider '{provider}'",
+                        "supported": supported}), 400
+    return _process_webhook(provider)
+
+
+# ── API: Webhook source management (session auth) ────────────────────────
+
+@app.route("/api/webhook_sources")
+def api_webhook_sources():
+    db = _get_db()
+    rows = db.execute(
+        "SELECT * FROM webhook_sources WHERE active=1 ORDER BY last_seen DESC"
+    ).fetchall()
+    result = []
+    for r in rows:
+        tasks = db.execute(
+            "SELECT * FROM webhook_tasks WHERE source_id=? "
+            "ORDER BY CASE status "
+            "  WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'paused' THEN 2 "
+            "  WHEN 'unknown' THEN 3 WHEN 'complete' THEN 4 WHEN 'failed' THEN 5 "
+            "  WHEN 'cancelled' THEN 6 ELSE 9 END, last_updated DESC",
+            (r["id"],)).fetchall()
+        task_list = []
+        for t in tasks:
+            findings = None
+            if t["findings_json"]:
+                try:
+                    findings = json.loads(t["findings_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            task_list.append({
+                "id": t["id"],
+                "task_name": t["task_name"],
+                "status": t["status"],
+                "progress": t["progress"],
+                "started_at": t["started_at"],
+                "ended_at": t["ended_at"],
+                "message": t["message"],
+                "findings_summary": findings,
+                "last_updated": t["last_updated"],
+            })
+        prov_name = r["provider"]
+        if _wp and hasattr(_wp, "PROVIDER_NAMES"):
+            prov_name = _wp.PROVIDER_NAMES.get(r["provider"], r["provider"])
+        result.append({
+            "id": r["id"],
+            "name": r["name"],
+            "provider": r["provider"],
+            "provider_name": prov_name,
+            "source_ip": r["source_ip"],
+            "last_seen": r["last_seen"],
+            "created_at": r["created_at"],
+            "tasks": task_list,
+        })
+    return jsonify(result)
+
+
+@app.route("/api/webhook_source/<source_id>", methods=["DELETE"])
+def api_webhook_source_delete(source_id):
+    with _db_lock:
+        db = _get_db()
+        db.execute("DELETE FROM webhook_tasks WHERE source_id=?", (source_id,))
+        db.execute("DELETE FROM webhook_sources WHERE id=?", (source_id,))
+        db.commit()
+    return jsonify({"status": "deleted"}), 200
+
+
+@app.route("/api/webhook/providers")
+def api_webhook_providers():
+    if _wp is None:
+        return jsonify({"providers": {"generic": "Generic"}})
+    return jsonify({"providers": _wp.PROVIDER_NAMES})
+
+
 # ── API: Dashboard data (session auth) ───────────────────────────────────
 
 @app.route("/api/engagements")
@@ -447,11 +695,19 @@ def _run_cleanup():
                     remove_ids,
                 )
 
+            wh_deleted = conn.execute(
+                "DELETE FROM webhook_sources WHERE last_seen < ?", (cutoff_ttl,)
+            ).rowcount
+            wh_tasks = conn.execute(
+                "DELETE FROM webhook_tasks WHERE last_updated < ?", (cutoff_ttl,)
+            ).rowcount
+
             conn.commit()
-            if deleted or remove_ids:
+            if deleted or remove_ids or wh_deleted:
                 conn.execute("VACUUM")
-                log.info("cleanup: removed %d engagements, pruned %d snapshots",
-                         deleted, len(remove_ids))
+                log.info("cleanup: removed %d engagements, pruned %d snapshots, "
+                         "removed %d webhook sources, %d webhook tasks",
+                         deleted, len(remove_ids), wh_deleted, wh_tasks)
         finally:
             conn.close()
 
@@ -477,9 +733,13 @@ def main():
     cleanup = threading.Thread(target=_cleanup_loop, daemon=True)
     cleanup.start()
 
+    wp_count = len(_wp.PARSERS) if _wp else 0
     print(f"\n  Beacon v{VERSION}")
     print(f"  https://{args.host}:{args.port}")
-    print(f"  Database: {_DB_PATH}\n")
+    print(f"  Database: {_DB_PATH}")
+    print(f"  Webhook parsers: {wp_count} providers loaded" if wp_count else
+          "  Webhook parsers: generic only (webhook_parsers.py not found)")
+    print()
 
     ctx = _auth.make_ssl_context()
     app.run(host=args.host, port=args.port, ssl_context=ctx, threaded=True)

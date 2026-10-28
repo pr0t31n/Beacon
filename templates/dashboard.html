@@ -199,6 +199,94 @@ a { color: var(--accent); text-decoration: none; }
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
+
+/* Section headers */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 24px 0 12px 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--fg-dim);
+}
+.section-header:first-child { margin-top: 0; }
+.section-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Provider badge */
+.provider-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: rgba(88,166,255,.15);
+  color: var(--accent);
+  border: 1px solid rgba(88,166,255,.25);
+  margin-left: 6px;
+}
+
+/* Progress bar */
+.progress-wrap {
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin: 6px 0 2px 0;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--status-running);
+  transition: width 0.4s ease;
+}
+.progress-fill.complete { background: var(--status-complete); }
+.progress-fill.failed { background: var(--status-failed); }
+
+/* Webhook task rows */
+.wh-task {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(48,54,61,.5);
+}
+.wh-task:last-child { border-bottom: none; }
+.wh-task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wh-task-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.wh-task-status {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.wh-task-msg {
+  font-size: 12px;
+  color: var(--fg-dim);
+  margin-top: 2px;
+}
+.wh-task-meta {
+  font-size: 11px;
+  color: var(--fg-dim);
+  margin-top: 2px;
+}
 </style>
 </head>
 <body>
@@ -212,14 +300,17 @@ a { color: var(--accent); text-decoration: none; }
   </div>
 </div>
 <div class="main" id="app">
+  <div id="engagements-section"></div>
+  <div id="webhooks-section"></div>
   <div class="empty" id="empty-state">
-    <h2>No active engagements</h2>
-    <p>Waiting for Crucible to connect...</p>
+    <h2>No active sources</h2>
+    <p>Waiting for Crucible or webhook connections...</p>
   </div>
 </div>
 <script>
 (function() {
-  var container = document.getElementById('app');
+  var engSection = document.getElementById('engagements-section');
+  var whSection = document.getElementById('webhooks-section');
   var emptyEl = document.getElementById('empty-state');
   var STATUS_ICONS = {
     complete: {sym: '✓', cls: 'complete'},
@@ -229,6 +320,8 @@ a { color: var(--accent); text-decoration: none; }
     queued:   {sym: '◷', cls: 'queued'},
     idle:     {sym: '—', cls: 'idle'},
     paused:   {sym: '‖', cls: 'queued'},
+    cancelled:{sym: '✗', cls: 'failed'},
+    unknown:  {sym: '?', cls: 'idle'},
   };
 
   function fmtTime(iso) {
@@ -261,6 +354,12 @@ a { color: var(--accent); text-decoration: none; }
     } catch(e) { return iso; }
   }
 
+  function _esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
   function renderRisk(findings) {
     if (!findings) return '';
     var levels = ['critical','high','medium','low','info'];
@@ -275,9 +374,17 @@ a { color: var(--accent); text-decoration: none; }
                  keys[i][0] + ':' + n + '</span>';
       }
     }
+    if (!pills) return '';
     return '<div class="risk-bar">' + pills +
            '<span class="risk-total">Total: ' + total + '</span></div>';
   }
+
+  function _sectionHeader(text) {
+    return '<div class="section-header"><span>' + _esc(text) +
+           '</span><span class="section-line"></span></div>';
+  }
+
+  // ── Engagement rendering ──
 
   function _toolName(tid) {
     var NAMES = {
@@ -323,9 +430,8 @@ a { color: var(--accent); text-decoration: none; }
     if (queue && queue.length) {
       for (var j = 0; j < queue.length; j++) {
         var q = queue[j];
-        var qic = STATUS_ICONS.queued;
         rows.push('<tr>' +
-          '<td><span class="status-icon queued">' + qic.sym + '</span></td>' +
+          '<td><span class="status-icon queued">◷</span></td>' +
           '<td class="tool-name">' + _esc(_toolName(q.tool_id || '')) + '</td>' +
           '<td class="tool-status">queued</td>' +
           '<td class="tool-time">pri:' + (q.priority || 0) + '</td>' +
@@ -336,15 +442,9 @@ a { color: var(--accent); text-decoration: none; }
     return '<table class="tool-table">' + rows.join('') + '</table>';
   }
 
-  function _esc(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
-
-  function renderCard(eng) {
+  function renderEngCard(eng) {
     var snap = eng.snapshot || {};
-    var html = '<div class="card" data-id="' + _esc(eng.id) + '">';
+    var html = '<div class="card" data-id="' + _esc(eng.id) + '" data-type="eng">';
     html += '<div class="card-header">';
     html += '<span class="card-title">' + _esc(eng.client_name || '') +
             (eng.client_name && eng.name ? ' — ' : '') +
@@ -367,31 +467,106 @@ a { color: var(--accent); text-decoration: none; }
     return html;
   }
 
+  // ── Webhook source rendering ──
+
+  function renderProgress(progress, status) {
+    if (progress === null || progress === undefined) return '';
+    var pct = Math.min(100, Math.max(0, Math.round(progress * 100)));
+    var cls = status === 'complete' ? ' complete' : status === 'failed' ? ' failed' : '';
+    return '<div class="progress-wrap"><div class="progress-fill' + cls +
+           '" style="width:' + pct + '%"></div></div>';
+  }
+
+  function renderWhTask(task) {
+    var st = task.status || 'unknown';
+    var ic = STATUS_ICONS[st] || STATUS_ICONS.unknown;
+    var html = '<div class="wh-task">';
+    html += '<div class="wh-task-header">';
+    html += '<span class="status-icon ' + ic.cls + '">' + ic.sym + '</span>&nbsp;';
+    html += '<span class="wh-task-name">' + _esc(task.task_name || task.id) + '</span>';
+    html += '<span class="wh-task-status" style="color:var(--status-' + ic.cls + ')">' + st + '</span>';
+    html += '</div>';
+    if (st === 'running' || task.progress !== null && task.progress !== undefined) {
+      html += renderProgress(task.progress, st);
+    }
+    if (task.message) {
+      html += '<div class="wh-task-msg">' + _esc(task.message) + '</div>';
+    }
+    html += renderRisk(task.findings_summary);
+    var meta = [];
+    if (task.started_at) meta.push('Started: ' + fmtTime(task.started_at));
+    if (task.ended_at) meta.push('Ended: ' + fmtTime(task.ended_at));
+    meta.push('Updated: <span class="last-seen" data-iso="' + _esc(task.last_updated || '') + '">' +
+              relativeTime(task.last_updated) + '</span>');
+    if (meta.length) {
+      html += '<div class="wh-task-meta">' + meta.join('&nbsp;&nbsp;') + '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderWhCard(src) {
+    var html = '<div class="card" data-id="' + _esc(src.id) + '" data-type="wh">';
+    html += '<div class="card-header">';
+    html += '<span class="card-title">' + _esc(src.name) +
+            '<span class="provider-badge">' + _esc(src.provider_name || src.provider) + '</span></span>';
+    var hasRunning = (src.tasks || []).some(function(t) { return t.status === 'running'; });
+    html += '<span class="card-status' + (hasRunning ? ' active' : '') + '">' +
+            (hasRunning ? '● ACTIVE' : '○ IDLE') + '</span>';
+    html += ' <button class="btn-delete" onclick="deleteWh(\'' + _esc(src.id) + '\')">Delete</button>';
+    html += '</div>';
+    html += '<div class="card-meta">';
+    if (src.source_ip) html += 'Source: ' + _esc(src.source_ip) + '&nbsp;&nbsp;';
+    html += 'Last update: <span class="last-seen" data-iso="' + _esc(src.last_seen || '') + '">' +
+            relativeTime(src.last_seen) + '</span>';
+    html += '&nbsp;&nbsp;Tasks: ' + (src.tasks || []).length;
+    html += '</div>';
+    var tasks = src.tasks || [];
+    for (var i = 0; i < tasks.length; i++) {
+      html += renderWhTask(tasks[i]);
+    }
+    if (!tasks.length) {
+      html += '<div style="color:var(--fg-dim);font-size:12px;padding:4px 0;">No tasks reported</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // ── Refresh logic ──
+
   function refresh() {
-    return fetch('/api/engagements', {credentials: 'same-origin'})
-      .then(function(r) {
+    return Promise.all([
+      fetch('/api/engagements', {credentials: 'same-origin'}).then(function(r) {
         if (r.status === 401) { window.location.href = '/auth/login'; return null; }
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
+        return r.ok ? r.json() : [];
+      }),
+      fetch('/api/webhook_sources', {credentials: 'same-origin'}).then(function(r) {
+        return r.ok ? r.json() : [];
       })
-      .then(function(data) {
-        if (!data) return;
-        if (!data.length) {
-          emptyEl.style.display = '';
-          var cards = container.querySelectorAll('.card');
-          for (var i = 0; i < cards.length; i++) cards[i].remove();
-          return;
-        }
-        emptyEl.style.display = 'none';
-        var html = '';
-        for (var i = 0; i < data.length; i++) html += renderCard(data[i]);
-        var tmp = document.createElement('div');
-        tmp.innerHTML = html;
-        var existing = container.querySelectorAll('.card');
-        for (var i = 0; i < existing.length; i++) existing[i].remove();
-        while (tmp.firstChild) container.appendChild(tmp.firstChild);
-      })
-      .catch(function(e) { console.error('refresh:', e); });
+    ]).then(function(results) {
+      var engs = results[0];
+      var sources = results[1];
+      if (engs === null) return;
+
+      var hasContent = (engs && engs.length) || (sources && sources.length);
+      emptyEl.style.display = hasContent ? 'none' : '';
+
+      // Engagements
+      var engHtml = '';
+      if (engs && engs.length) {
+        engHtml = _sectionHeader('Engagements');
+        for (var i = 0; i < engs.length; i++) engHtml += renderEngCard(engs[i]);
+      }
+      engSection.innerHTML = engHtml;
+
+      // Webhook sources
+      var whHtml = '';
+      if (sources && sources.length) {
+        whHtml = _sectionHeader('External Tools');
+        for (var j = 0; j < sources.length; j++) whHtml += renderWhCard(sources[j]);
+      }
+      whSection.innerHTML = whHtml;
+    }).catch(function(e) { console.error('refresh:', e); });
   }
 
   window.deleteEng = function(id) {
@@ -400,14 +575,17 @@ a { color: var(--accent); text-decoration: none; }
       method: 'DELETE', credentials: 'same-origin'
     })
     .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.status === 'deleted') {
-        var card = document.querySelector('.card[data-id="' + id + '"]');
-        if (card) card.remove();
-        var remaining = container.querySelectorAll('.card');
-        if (!remaining.length) emptyEl.style.display = '';
-      }
+    .then(function() { refresh(); })
+    .catch(function(e) { console.error('delete:', e); });
+  };
+
+  window.deleteWh = function(id) {
+    if (!confirm('Delete this webhook source? This cannot be undone.')) return;
+    fetch('/api/webhook_source/' + encodeURIComponent(id), {
+      method: 'DELETE', credentials: 'same-origin'
     })
+    .then(function(r) { return r.json(); })
+    .then(function() { refresh(); })
     .catch(function(e) { console.error('delete:', e); });
   };
 
