@@ -28,10 +28,21 @@ except ImportError:
     _wp = None
 
 VERSION = Path(__file__).resolve().parent.joinpath("VERSION").read_text().strip()
+_SETTINGS_FILE = Path(__file__).resolve().parent / "beacon_settings.json"
 
 _MAX_WEBHOOK_PAYLOAD = 1 * 1024 * 1024  # 1 MB
 
 log = logging.getLogger("beacon")
+
+
+def _load_settings() -> dict:
+    """Load beacon_settings.json. Returns empty dict if missing or invalid."""
+    if not _SETTINGS_FILE.exists():
+        return {}
+    try:
+        return json.loads(_SETTINGS_FILE.read_text())
+    except Exception:
+        return {}
 
 # ── App factory ───────────────────────────────────────────────────────────
 
@@ -733,15 +744,22 @@ def main():
     cleanup = threading.Thread(target=_cleanup_loop, daemon=True)
     cleanup.start()
 
+    settings = _load_settings()
+    extra_ips = settings.get("public_ips") or []
+    extra_dns = settings.get("public_hostnames") or []
+
     wp_count = len(_wp.PARSERS) if _wp else 0
     print(f"\n  Beacon v{VERSION}")
     print(f"  https://{args.host}:{args.port}")
     print(f"  Database: {_DB_PATH}")
+    if extra_ips or extra_dns:
+        print(f"  Extra SANs: {', '.join(extra_ips + extra_dns)}")
     print(f"  Webhook parsers: {wp_count} providers loaded" if wp_count else
           "  Webhook parsers: generic only (webhook_parsers.py not found)")
     print()
 
-    ctx = _auth.make_ssl_context()
+    ctx = _auth.make_ssl_context(extra_ips=extra_ips or None,
+                                 extra_dns=extra_dns or None)
     app.run(host=args.host, port=args.port, ssl_context=ctx, threaded=True)
 
 

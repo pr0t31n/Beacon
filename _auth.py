@@ -226,9 +226,14 @@ _CIPHERS = (
     "!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP:!3DES"
 )
 
-def _local_ips_for_cert() -> str:
+def _local_ips_for_cert(extra_ips=None, extra_dns=None) -> str:
     """Return a comma-separated SAN string covering all local IPv4 addresses."""
     ips: set = {"127.0.0.1"}
+    dns_names: set = {"localhost"}
+    if extra_ips:
+        ips.update(extra_ips)
+    if extra_dns:
+        dns_names.update(extra_dns)
     try:
         if os.path.exists("/sbin/ip") or os.path.exists("/usr/sbin/ip"):
             out = subprocess.check_output(["ip", "-4", "addr"], text=True, timeout=5)
@@ -250,15 +255,48 @@ def _local_ips_for_cert() -> str:
                         ips.add(ip)
     except Exception:
         pass
-    return ",".join(f"IP:{ip}" for ip in sorted(ips)) + ",DNS:localhost"
+    parts = [f"IP:{ip}" for ip in sorted(ips)]
+    parts.extend(f"DNS:{d}" for d in sorted(dns_names))
+    return ",".join(parts)
 
 
-def make_ssl_context() -> ssl.SSLContext:
-    """Return a hardened SSLContext, generating a self-signed cert if absent."""
+def _read_cert_sans(cert_path) -> tuple[set, set]:
+    """Read IP and DNS SANs from an existing certificate."""
+    ips, dns_names = set(), set()
+    try:
+        out = subprocess.check_output(
+            ["openssl", "x509", "-noout", "-ext", "subjectAltName",
+             "-in", str(cert_path)],
+            text=True, timeout=5, stderr=subprocess.DEVNULL,
+        )
+        for line in out.splitlines():
+            for part in line.split(","):
+                part = part.strip()
+                if part.startswith("IP Address:"):
+                    ips.add(part.split(":", 1)[1].strip())
+                elif part.startswith("DNS:"):
+                    dns_names.add(part.split(":", 1)[1].strip())
+    except Exception:
+        pass
+    return ips, dns_names
+
+
+def make_ssl_context(extra_ips=None, extra_dns=None) -> ssl.SSLContext:
+    """Return a hardened SSLContext, generating a self-signed cert if absent or stale."""
     cert = _DIR / "ssl.crt"
     key  = _DIR / "ssl.key"
+    if cert.exists() and key.exists() and (extra_ips or extra_dns):
+        cert_ips, cert_dns = _read_cert_sans(cert)
+        needs_regen = False
+        if extra_ips and not set(extra_ips).issubset(cert_ips):
+            needs_regen = True
+        if extra_dns and not set(extra_dns).issubset(cert_dns):
+            needs_regen = True
+        if needs_regen:
+            cert.unlink(missing_ok=True)
+            key.unlink(missing_ok=True)
     if not cert.exists() or not key.exists():
-        san = _local_ips_for_cert()
+        san = _local_ips_for_cert(extra_ips=extra_ips, extra_dns=extra_dns)
         subprocess.run(
             [
                 "openssl", "req", "-x509", "-newkey", "rsa:4096",
