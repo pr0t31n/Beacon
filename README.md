@@ -5,7 +5,7 @@ Engagement and scan status server for the pr0t31n toolkit. Receives push updates
 ## Features
 
 - **Multi-engagement dashboard** — track multiple concurrent engagements from multiple Crucible instances
-- **Third-party webhook integration** — Nessus, Qualys, InsightVM, OpenVAS, Burp Enterprise, Checkmarx, Trivy, Veracode, GoPhish, Semgrep, SonarQube, Snyk, CodeQL
+- **Third-party webhook integration** — Checkmarx One, GoPhish, Semgrep Cloud, SonarQube, Snyk
 - **Generic webhook API** — any tool can push status using Beacon's prescribed JSON schema
 - **Pre-shared token auth** — TOFU-style registration; tokens SHA-256 hashed at rest
 - **TLS 1.2+** — self-signed cert auto-generated on first run
@@ -91,7 +91,7 @@ POST /api/webhook/<provider>
 Authorization: Bearer <token>
 ```
 
-Supported providers: `nessus`, `qualys`, `insightvm`, `openvas`, `burp_enterprise`, `checkmarx`, `trivy`, `veracode`, `gophish`, `semgrep`, `sonarqube`, `snyk`, `codeql`. Each parses the tool's native webhook format. Configure `https://<beacon>:9443/api/webhook/<provider>` as the webhook URL in the tool's settings.
+Supported providers: `checkmarx`, `gophish`, `semgrep`, `sonarqube`, `snyk`. Each parses the tool's native webhook format. Configure `https://<beacon>:9443/api/webhook/<provider>` as the webhook URL in the tool's settings.
 
 ### Dashboard endpoints (session auth)
 

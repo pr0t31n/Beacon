@@ -111,19 +111,11 @@ Same bearer-token authentication. Beacon parses the provider's native webhook pa
 
 | Provider slug | Tool | Configuration path |
 |---|---|---|
-| `nessus` | Tenable Nessus | Settings > Notifications > Webhook URL |
-| `qualys` | Qualys VM/PC | Notifications > Add Webhook |
-| `insightvm` | Rapid7 InsightVM | Administration > Notification Methods > Webhook |
-| `openvas` | OpenVAS / Greenbone | Alerts > Method: HTTP Get/POST |
-| `burp_enterprise` | Burp Suite Enterprise | Settings > Webhooks |
-| `checkmarx` | Checkmarx One / SAST | Settings > Webhooks |
-| `trivy` | Aqua Trivy | CI pipeline `curl` POST or Trivy Server webhook config |
-| `veracode` | Veracode | Admin > Webhooks |
-| `gophish` | GoPhish | Campaign > Webhook URL |
-| `semgrep` | Semgrep Cloud | Settings > Notifications > Webhook |
+| `checkmarx` | Checkmarx One | Settings > Webhooks > Add webhook (Completed Scan / Failed Scan events) |
+| `gophish` | GoPhish | Sidebar > Webhooks > Add webhook URL |
+| `semgrep` | Semgrep Cloud | Settings > Integrations > Webhooks (Team/Enterprise tier) |
 | `sonarqube` | SonarQube | Administration > Configuration > Webhooks |
 | `snyk` | Snyk | Org Settings > Integrations > Webhooks |
-| `codeql` | GitHub CodeQL | Repo Settings > Webhooks > Select `code_scanning_alert` event |
 
 ### Configuration
 
@@ -147,31 +139,15 @@ Query-parameter auth is accepted on all provider endpoints as a fallback.
 
 ### Provider-Specific Notes
 
-**Nessus** — Beacon parses the scan status webhook (`scan.completed`, `scan.started`, etc.). Findings summary is extracted from the `severitycount` object if present.
+**Checkmarx One** — Beacon parses the scan completion webhook. Events: `Completed Scan`, `Failed Scan`. Maps Checkmarx severity values to standard risk levels. Note: this is Checkmarx One (cloud platform), not legacy CxSAST.
 
-**Qualys** — Beacon accepts the notification payload from VM scans. Maps Qualys severity levels (1-5) to CRITICAL/HIGH/MEDIUM/LOW/INFO.
+**GoPhish** — Beacon parses campaign event webhooks. Campaign status (in progress, completed) and event stats (emails sent, opened, clicked, submitted data, reported) are extracted. Native webhook support since GoPhish v0.9.0. Optional HMAC-SHA256 signing supported.
 
-**InsightVM** — Beacon parses the scan event notification. Maps InsightVM risk scores to standard risk levels.
+**Semgrep Cloud** — Beacon parses the deployment notification webhook (`semgrep_scan` events). Finding counts by severity are extracted from the results summary. Requires Team or Enterprise tier.
 
-**OpenVAS** — Beacon accepts the HTTP alert payload. Task status is derived from the alert condition (task run status changed).
+**SonarQube** — Beacon parses the analysis completion webhook (`project_analysis_complete`). Quality gate status and conditions are extracted. Up to 10 webhooks per project plus 10 global webhooks configurable in the UI.
 
-**Burp Enterprise** — Beacon parses scan event webhooks (`scan_started`, `scan_succeeded`, `scan_failed`). Issue counts are mapped by confidence/severity.
-
-**Checkmarx** — Beacon parses the scan completion webhook. Maps Checkmarx severity values to standard risk levels.
-
-**Trivy** — Beacon accepts a POST of Trivy's JSON report output. Vulnerability counts are extracted by severity.
-
-**Veracode** — Beacon parses the scan status change webhook. Maps Veracode severity (0-5) to standard risk levels.
-
-**GoPhish** — Beacon parses campaign event webhooks (`email_sent`, `email_opened`, `clicked_link`, `submitted_data`). Progress is derived from `(events received / emails sent)`. Findings summary maps to: compromised credentials = CRITICAL, clicked links = HIGH, opened emails = MEDIUM, sent = INFO.
-
-**Semgrep** — Beacon parses the deployment notification webhook. Finding counts by severity are extracted from the results summary.
-
-**SonarQube** — Beacon parses the analysis completion webhook (`project_analysis_complete`). Quality gate status and issue counts by severity are extracted.
-
-**Snyk** — Beacon parses the project snapshot webhook. Vulnerability counts by severity are mapped to standard risk levels.
-
-**CodeQL** — Beacon parses GitHub's `code_scanning_alert` webhook event. Alert rule severity is mapped to standard risk levels. Handles `created`, `fixed`, `reopened`, `closed_by_user` actions.
+**Snyk** — Beacon parses the project snapshot webhook. Fires on recurring test completion with new/removed issue counts by severity. Configurable via Snyk API.
 
 ### Unrecognized Providers
 
