@@ -285,18 +285,15 @@ def make_ssl_context(extra_ips=None, extra_dns=None) -> ssl.SSLContext:
     """Return a hardened SSLContext, generating a self-signed cert if absent or stale."""
     cert = _DIR / "ssl.crt"
     key  = _DIR / "ssl.key"
-    if cert.exists() and key.exists() and (extra_ips or extra_dns):
+    san = _local_ips_for_cert(extra_ips=extra_ips, extra_dns=extra_dns)
+    if cert.exists() and key.exists():
         cert_ips, cert_dns = _read_cert_sans(cert)
-        needs_regen = False
-        if extra_ips and not set(extra_ips).issubset(cert_ips):
-            needs_regen = True
-        if extra_dns and not set(extra_dns).issubset(cert_dns):
-            needs_regen = True
-        if needs_regen:
+        required_ips = {p.split(":", 1)[1] for p in san.split(",") if p.startswith("IP:")}
+        required_dns = {p.split(":", 1)[1] for p in san.split(",") if p.startswith("DNS:")}
+        if not required_ips.issubset(cert_ips) or not required_dns.issubset(cert_dns):
             cert.unlink(missing_ok=True)
             key.unlink(missing_ok=True)
     if not cert.exists() or not key.exists():
-        san = _local_ips_for_cert(extra_ips=extra_ips, extra_dns=extra_dns)
         subprocess.run(
             [
                 "openssl", "req", "-x509", "-newkey", "rsa:4096",

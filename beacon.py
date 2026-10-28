@@ -28,31 +28,28 @@ except ImportError:
     _wp = None
 
 VERSION = Path(__file__).resolve().parent.joinpath("VERSION").read_text().strip()
-_SETTINGS_FILE = Path(__file__).resolve().parent / "beacon_settings.json"
 
 _MAX_WEBHOOK_PAYLOAD = 1 * 1024 * 1024  # 1 MB
 
 log = logging.getLogger("beacon")
 
 
-def _load_settings() -> dict:
-    """Load beacon_settings.json. Returns empty dict if missing or invalid."""
-    if not _SETTINGS_FILE.exists():
-        return {}
-    try:
-        data = json.loads(_SETTINGS_FILE.read_text())
-    except (json.JSONDecodeError, OSError) as exc:
-        print(f"  WARNING: beacon_settings.json is invalid: {exc}")
-        return {}
-    for key in ("public_ips", "public_hostnames"):
-        val = data.get(key)
-        if isinstance(val, list):
-            bad = [v for v in val if not isinstance(v, str)]
-            if bad:
-                print(f"  ERROR: beacon_settings.json '{key}' entries must be "
-                      f"quoted strings, got: {bad}")
-                data[key] = [v for v in val if isinstance(v, str)]
-    return data
+def _detect_public_ip() -> str | None:
+    """Auto-detect public IP via external services. Returns None if unreachable."""
+    import urllib.request
+    for url in ("https://api.ipify.org",
+                "https://checkip.amazonaws.com",
+                "https://ifconfig.me",
+                "https://icanhazip.com"):
+        try:
+            resp = urllib.request.urlopen(url, timeout=5)
+            ip = resp.read().decode().strip()
+            parts = ip.split(".")
+            if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+                return ip
+        except Exception:
+            continue
+    return None
 
 # ── App factory ───────────────────────────────────────────────────────────
 
@@ -754,22 +751,18 @@ def main():
     cleanup = threading.Thread(target=_cleanup_loop, daemon=True)
     cleanup.start()
 
-    settings = _load_settings()
-    extra_ips = settings.get("public_ips") or []
-    extra_dns = settings.get("public_hostnames") or []
+    pub_ip = _detect_public_ip()
 
     wp_count = len(_wp.PARSERS) if _wp else 0
     print(f"\n  Beacon v{VERSION}")
     print(f"  https://{args.host}:{args.port}")
     print(f"  Database: {_DB_PATH}")
-    if extra_ips or extra_dns:
-        print(f"  Extra SANs: {', '.join(extra_ips + extra_dns)}")
+    print(f"  Public IP: {pub_ip}" if pub_ip else "  Public IP: not detected")
     print(f"  Webhook parsers: {wp_count} providers loaded" if wp_count else
           "  Webhook parsers: generic only (webhook_parsers.py not found)")
     print()
 
-    ctx = _auth.make_ssl_context(extra_ips=extra_ips or None,
-                                 extra_dns=extra_dns or None)
+    ctx = _auth.make_ssl_context(extra_ips=[pub_ip] if pub_ip else None)
     app.run(host=args.host, port=args.port, ssl_context=ctx, threaded=True)
 
 
