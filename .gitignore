@@ -15,3 +15,6 @@ beacon.db
 
 # OS
 .DS_Store
+
+# Flask session key
+.secret_key
