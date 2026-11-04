@@ -1,4 +1,17 @@
+# Python
+__pycache__/
+*.pyc
 
+# Secrets
 ssl.key
 ssl.crt
 .auth.json
+
+# Runtime data
+beacon.db
+
+# Backups
+*.bak*
+
+# OS
+.DS_Store
