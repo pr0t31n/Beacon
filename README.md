@@ -2,6 +2,9 @@
 
 Engagement and scan status server for the pr0t31n toolkit. Receives push updates from Crucible instances and third-party security tools via webhooks. Presents a spartan, read-only dashboard showing live progress across all sources.
 
+
+> **[View full documentation on the Codex Wiki](https://wiki.pr0t31n.com/tools/beacon)** — detailed features, CLI reference, findings catalogue, and integration guides.
+
 ## Features
 
 - **Multi-engagement dashboard** — track multiple concurrent engagements from multiple Crucible instances
