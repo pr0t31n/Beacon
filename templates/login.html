@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Beacon — Login</title>
+<title>Login</title>
 <style>
 :root {
   --bg: #0d1117;
@@ -84,7 +84,7 @@ body {
 </head>
 <body>
 <div class="login-box">
-  <h1>Beacon</h1>
+  <h1>Sign In</h1>
   {% if error %}
   <div class="error">{{ error }}</div>
   {% endif %}
@@ -92,11 +92,11 @@ body {
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="field">
       <label>Username</label>
-      <input type="text" name="username" autofocus required>
+      <input type="text" name="username" autocomplete="username" autofocus required>
     </div>
     <div class="field">
       <label>Password</label>
-      <input type="password" name="password" required>
+      <input type="password" name="password" autocomplete="current-password" required>
     </div>
     <button type="submit" class="btn">Sign In</button>
   </form>
