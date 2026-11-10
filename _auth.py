@@ -62,8 +62,28 @@ def is_weak_username(username: str) -> Optional[str]:
         return f"'{username}' is not allowed. Choose a unique username."
     return None
 
+_MIN_PASSWORD_LENGTH = 12
+_SPECIAL_CHARS = set("!@#$%^&*()-_=+[]{}|;:'\",.<>?/`~\\")
+
+def check_password_complexity(password: str) -> Optional[str]:
+    """Return an error string if the password fails complexity requirements, else None."""
+    if len(password) < _MIN_PASSWORD_LENGTH:
+        return f"Password must be at least {_MIN_PASSWORD_LENGTH} characters."
+    if not any(c.islower() for c in password):
+        return "Password must contain at least one lowercase letter."
+    if not any(c.isupper() for c in password):
+        return "Password must contain at least one uppercase letter."
+    if not any(c.isdigit() for c in password):
+        return "Password must contain at least one number."
+    if not any(c in _SPECIAL_CHARS for c in password):
+        return "Password must contain at least one special character."
+    return None
+
 def is_weak_password(password: str, username: str = "") -> Optional[str]:
-    """Return an error string if the password is too common or matches the username, else None."""
+    """Return an error string if the password fails complexity or is blocked, else None."""
+    err = check_password_complexity(password)
+    if err:
+        return err
     if password.lower() in _BLOCKED_PASSWORDS:
         return "That password is too common. Choose a stronger password."
     if username and password.lower() == username.lower():
